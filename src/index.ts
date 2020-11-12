@@ -7,14 +7,51 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { ApolloServer } from 'apollo-server-express';
 import { buildSchema } from 'type-graphql';
-import { HelloResolver } from './resolvers/hello';
+import { UserResolver } from './resolvers/user';
 import { PostResolver } from './resolvers/post';
+import redis from 'redis';
+import connectRedis from 'connect-redis';
+import session from 'express-session';
+import { MyContext } from './types';
+import cors from 'cors';
+
 dotenv.config();
 
 const main = async () => {
   const app = express();
+
+  const RedisStore = connectRedis(session);
+  const redisClient = redis.createClient();
+
+  app.use(
+    cors({
+      origin: 'http://localhost:3000',
+      credentials: true,
+    })
+  );
+
+  app.use(
+    session({
+      name: 'qid',
+
+      store: new RedisStore({
+        client: redisClient,
+        disableTouch: true,
+      }),
+      cookie: {
+        maxAge: 1000 * 60 * 60 * 24 * 365 * 10,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: __prod__,
+      },
+      saveUninitialized: false,
+      secret: 'daSDAffefw4wgfethytkty',
+      resave: false,
+    })
+  );
+
   const orm = await MikroORM.init(microConfig);
-  // orm.getMigrator().up()
+  orm.getMigrator().up();
   const post = await orm.em.create(Post, { title: 'my first post 2' });
   // await orm.em.persistAndFlush(post)
   // const posts = await orm.em.find(Post,{});
@@ -23,13 +60,16 @@ const main = async () => {
 
   const apolloServer = new ApolloServer({
     schema: await buildSchema({
-      resolvers: [HelloResolver, PostResolver],
+      resolvers: [PostResolver, UserResolver],
       validate: false,
     }),
-    context: () => ({ em: orm.em }),
+    context: ({ req, res }) => ({ em: orm.em, req, res }),
   });
 
-  apolloServer.applyMiddleware({ app });
+  apolloServer.applyMiddleware({
+    app,
+    cors: false,
+  });
   app.listen(4000, () => console.log('Server runing on port 4000'));
 };
 
